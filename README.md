@@ -51,3 +51,4 @@ Copy `.env.example` to `.env` and fill in provider-specific values locally. Keep
 ## Data handling
 
 The Excel export is the primary review surface. It includes recruiter contacts, provenance, approval/status fields, and a README sheet; optional job-lead support is planned in the same workbook format. Provide deletion and export controls for user data. Obtain applicable legal/compliance review before production outreach in Canada.
+

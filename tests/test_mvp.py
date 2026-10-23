@@ -33,3 +33,24 @@ def test_suppression_blocks_draft():
     drafts, blocked = build_drafts([contact], "resume.pdf", {"a@example.com"})
     assert drafts == []
     assert blocked[0]["reasons"] == ["suppressed_or_opted_out"]
+import json
+
+from recruiter_outreach.llm import LLMClient, LLMConfig
+from recruiter_outreach.models import Contact
+
+
+class FakeLLMClient(LLMClient):
+    def generate(self, contact, resume_text=""):
+        return {"subject": f"Role at {contact.company}", "body": "Hello, this is a grounded draft."}
+
+
+def test_llm_draft_uses_structured_response():
+    contact = Contact(email="a@example.com", company="Example", source_url="https://example.com", permission_status="public-business-contact")
+    draft = __import__("recruiter_outreach.llm", fromlist=["create_llm_draft"]).create_llm_draft(contact, "resume.pdf", FakeLLMClient(LLMConfig(provider="test")))
+    assert draft.subject == "Role at Example"
+    assert draft.resume_path == "resume.pdf"
+
+
+def test_disabled_llm_config_is_safe():
+    config = LLMConfig(provider="none")
+    assert not config.enabled

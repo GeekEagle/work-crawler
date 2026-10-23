@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .llm import LLMClient, create_llm_draft
 from .models import Contact, Draft
 
 
@@ -49,7 +50,7 @@ def create_draft(contact: Contact, resume_path: str | Path) -> Draft:
                  resume_path=str(resume_path), approved=False, dry_run=True)
 
 
-def build_drafts(contacts: list[Contact], resume_path: str | Path, suppression: set[str]) -> tuple[list[Draft], list[dict]]:
+def build_drafts(contacts: list[Contact], resume_path: str | Path, suppression: set[str], llm_client: LLMClient | None = None) -> tuple[list[Draft], list[dict]]:
     drafts: list[Draft] = []
     blocked: list[dict] = []
     for contact in contacts:
@@ -57,5 +58,12 @@ def build_drafts(contacts: list[Contact], resume_path: str | Path, suppression: 
         if reasons:
             blocked.append({"email": contact.email, "reasons": reasons})
             continue
+        if llm_client is not None:
+            try:
+                drafts.append(create_llm_draft(contact, str(resume_path), llm_client))
+                continue
+            except RuntimeError as exc:
+                blocked.append({"email": contact.email, "reasons": ["llm_error", str(exc)]})
+                continue
         drafts.append(create_draft(contact, resume_path))
     return drafts, blocked
