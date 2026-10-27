@@ -54,3 +54,17 @@ def test_llm_draft_uses_structured_response():
 def test_disabled_llm_config_is_safe():
     config = LLMConfig(provider="none")
     assert not config.enabled
+import urllib.parse
+
+from recruiter_outreach.linkedin import LinkedInConfig, authorization_url
+
+
+def test_authorization_url_contains_registered_callback_and_scopes():
+    config = LinkedInConfig("client", "secret", "http://127.0.0.1:8000/callback")
+    url, state = authorization_url(config, state="test-state")
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert query["client_id"] == ["client"]
+    assert query["redirect_uri"] == [config.redirect_uri]
+    assert query["scope"] == ["openid profile email"]
+    assert query["state"] == ["test-state"]
+    assert state == "test-state"

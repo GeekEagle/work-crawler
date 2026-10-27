@@ -52,3 +52,23 @@ Copy `.env.example` to `.env` and fill in provider-specific values locally. Keep
 
 The Excel export is the primary review surface. It includes recruiter contacts, provenance, approval/status fields, and a README sheet; optional job-lead support is planned in the same workbook format. Provide deletion and export controls for user data. Obtain applicable legal/compliance review before production outreach in Canada.
 
+
+## LinkedIn OAuth diagnostics
+
+The project now includes an OAuth helper for permitted LinkedIn identity access. It does not scrape LinkedIn or provide recruiter/job-directory access.
+
+1. In the LinkedIn Developer Portal, register an exact redirect URI such as `http://127.0.0.1:8000/auth/linkedin/callback` if supported by your app configuration.
+2. Add the redirect URI to `llm-config.txt` as `LinkedIn Redirect URI=...`, or set `LINKEDIN_REDIRECT_URI` in the local environment.
+3. Configure the scopes approved by LinkedIn. The default is `openid profile email`.
+4. Generate an authorization URL:
+
+```powershell
+$env:LINKEDIN_REDIRECT_URI='http://127.0.0.1:8000/auth/linkedin/callback'
+python -m recruiter_outreach.cli linkedin-auth-url
+```
+
+5. Open the printed URL in a browser and authorize the application.
+6. Use the returned callback `code` with `linkedin-exchange`. The CLI never prints the access token.
+7. Check basic permitted identity access with `linkedin-check-token` using the token locally.
+
+The current implementation only tests the official identity endpoint. Job or recruiter data requires a separately approved LinkedIn product and scope; no unsupported endpoint is called.

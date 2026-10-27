@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .linkedin import LinkedInConfig, authorization_url, exchange_code, get_userinfo
 from .llm import LLMClient, LLMConfig
 from .models import Contact
 from .outreach import build_drafts, load_suppression
@@ -29,13 +30,38 @@ def main() -> None:
     draft_parser.add_argument("--suppression", default="data/suppression.csv")
     draft_parser.add_argument("--llm", action="store_true", help="Use the configured LLM provider")
 
+    linkedin_url_parser = subparsers.add_parser("linkedin-auth-url", help="Create LinkedIn OAuth authorization URL")
+    linkedin_url_parser.add_argument("--config", default="llm-config.txt")
+
+    linkedin_token_parser = subparsers.add_parser("linkedin-exchange", help="Exchange an OAuth code; never logs the token")
+    linkedin_token_parser.add_argument("--code", required=True)
+    linkedin_token_parser.add_argument("--config", default="llm-config.txt")
+
+    linkedin_check_parser = subparsers.add_parser("linkedin-check-token", help="Check permitted LinkedIn identity access")
+    linkedin_check_parser.add_argument("--token", required=True)
+
     send_parser = subparsers.add_parser("send")
     send_parser.add_argument("--drafts", required=True)
     send_parser.add_argument("--resume", required=True)
     send_parser.add_argument("--real-send", action="store_true", help="Reserved; real sending is not enabled in MVP")
 
     args = parser.parse_args()
-    if args.command == "export-workbook":
+    if args.command == "linkedin-auth-url":
+        config = LinkedInConfig.from_env_or_file(config_path=args.config)
+        url, state = authorization_url(config)
+        print(f"Open this URL in your browser:\n{url}")
+        print(f"Save this state value for callback verification (not a secret): {state}")
+    elif args.command == "linkedin-exchange":
+        config = LinkedInConfig.from_env_or_file(config_path=args.config)
+        token_response = exchange_code(config, args.code)
+        safe = {key: value for key, value in token_response.items() if key not in {"access_token", "refresh_token"}}
+        print(json.dumps(safe, indent=2))
+        print("Token exchange succeeded; store the token in a local secret manager, not Git.")
+    elif args.command == "linkedin-check-token":
+        profile = get_userinfo(args.token)
+        safe = {key: profile.get(key) for key in ("sub", "name", "given_name", "family_name", "email", "email_verified") if key in profile}
+        print(json.dumps(safe, indent=2))
+    elif args.command == "export-workbook":
         contacts = read_contacts(args.input)
         path = export_workbook(contacts, args.output)
         print(f"Exported {len(contacts)} contacts to {path}")
