@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+from dotenv import load_dotenv
+from .job_sync import config_from_env, watch
 from .linkedin import LinkedInConfig, authorization_url, exchange_code, get_userinfo
 from .llm import LLMClient, LLMConfig
 from .models import Contact
@@ -40,13 +42,35 @@ def main() -> None:
     linkedin_check_parser = subparsers.add_parser("linkedin-check-token", help="Check permitted LinkedIn identity access")
     linkedin_check_parser.add_argument("--token", required=True)
 
+    sync_parser = subparsers.add_parser("sync-jobs", help="轮询公开职位来源并导出 Excel")
+    sync_parser.add_argument("--source", choices=("adzuna", "jooble", "boards"), action="append")
+    sync_parser.add_argument("--term", action="append", help="职位关键词，可多次指定")
+    sync_parser.add_argument("--city", action="append", help="加拿大搜索地区，可多次指定")
+    sync_parser.add_argument("--boards", default="", help="UTF-8 文件：平台|公司名称|公开 board slug")
+    sync_parser.add_argument("--pages", type=int, default=1)
+    sync_parser.add_argument("--interval", type=int, default=900, help="轮询间隔，秒；最小 300 秒")
+    sync_parser.add_argument("--once", action="store_true", help="仅执行一次同步")
+    sync_parser.add_argument("--database", default="data/jobs.sqlite3")
+    sync_parser.add_argument("--output", default="output/latest_jobs.xlsx")
     send_parser = subparsers.add_parser("send")
     send_parser.add_argument("--drafts", required=True)
     send_parser.add_argument("--resume", required=True)
     send_parser.add_argument("--real-send", action="store_true", help="Reserved; real sending is not enabled in MVP")
 
     args = parser.parse_args()
-    if args.command == "linkedin-auth-url":
+    if args.command == "sync-jobs":
+        load_dotenv()
+        if args.pages < 1 or args.pages > 5:
+            parser.error("--pages 需为 1–5")
+        if not args.once and args.interval < 300:
+            parser.error("--interval 至少 300 秒，以减少 API 请求")
+        boards = Path(args.boards).read_text(encoding="utf-8-sig") if args.boards else ""
+        config = config_from_env(args.source or [], args.term or [], args.city or [], args.pages, boards, args.interval)
+        try:
+            watch(config, args.database, args.output, once=args.once)
+        except KeyboardInterrupt:
+            print("已停止职位同步")
+    elif args.command == "linkedin-auth-url":
         config = LinkedInConfig.from_env_or_file(config_path=args.config)
         url, state = authorization_url(config)
         print(f"Open this URL in your browser:\n{url}")
@@ -90,3 +114,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+

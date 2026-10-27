@@ -101,3 +101,14 @@ LinkedIn OAuth 的能力取决于应用获得批准的产品和权限范围。�
 - **邮件合规：** 在加拿大正式联系招聘人员前，需要进行单独的法律和合规审查。决策条件：确定邮件服务商和实际运营地区。
 - **服务商选择：** 在实现适配器前，确定第一个职位聚合 API 和第一个 OAuth 邮件服务商。
 - **简历隐私：** 决定是否允许将简历正文发送给配置的 LLM 服务商；默认保持关闭。
+
+## 第一阶段合并状态
+
+`work-assistant` 的职位来源、SQLite 去重和 Excel 导出能力已经迁移到主包：
+
+- `src/recruiter_outreach/job_sources.py`
+- `src/recruiter_outreach/job_storage.py`
+- `src/recruiter_outreach/job_excel.py`
+- `src/recruiter_outreach/job_sync.py`
+
+当前可通过 `sync-jobs --once` 执行一次同步，也可以通过 `sync-jobs --interval 900` 持续轮询。第一阶段不包含 LinkedIn 页面抓取，也不启用真实邮件自动发送。

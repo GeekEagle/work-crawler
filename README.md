@@ -50,7 +50,7 @@ Copy `.env.example` to `.env` and fill in provider-specific values locally. Keep
 
 ## Data handling
 
-The Excel export is the primary review surface. It includes recruiter contacts, provenance, approval/status fields, and a README sheet; optional job-lead support is planned in the same workbook format. Provide deletion and export controls for user data. Obtain applicable legal/compliance review before production outreach in Canada.
+The Excel export is the primary review surface. It includes recruiter contacts, provenance, approval/status fields, and a README sheet; Job lead synchronization is now available through the `sync-jobs` CLI; the workbook is the primary review surface. Provide deletion and export controls for user data. Obtain applicable legal/compliance review before production outreach in Canada.
 
 
 ## LinkedIn OAuth diagnostics
@@ -72,3 +72,28 @@ python -m recruiter_outreach.cli linkedin-auth-url
 7. Check basic permitted identity access with `linkedin-check-token` using the token locally.
 
 The current implementation only tests the official identity endpoint. Job or recruiter data requires a separately approved LinkedIn product and scope; no unsupported endpoint is called.
+
+## 定时发现加拿大最新职位
+
+`work-assistant` 已有的 Adzuna、Jooble、Ashby、Lever、Greenhouse 来源、SQLite 指纹去重和 `first_seen`/`last_seen` 已并入 `src/recruiter_outreach/`。主项目保留联系人 Excel、LLM 草稿和 LinkedIn OAuth 诊断，现阶段**不启用**原项目的 SMTP 自动发送。这里的“实时”指按间隔轮询公开来源，不是推送或保证全网零延迟。
+
+配置合法来源：
+
+- Adzuna：在本地 `.env` 中填 `ADZUNA_APP_ID` 和 `ADZUNA_APP_KEY`。
+- Jooble：在本地 `.env` 中填 `JOOBLE_API_KEY`。
+- 企业招聘板：先从企业官网核实确实使用 Ashby、Lever 或 Greenhouse，再把 `平台|公司|slug` 按行写入本地 UTF-8 文件，例如 `data/boards.txt`。
+
+只抓一次：
+
+```powershell
+python -m recruiter_outreach.cli sync-jobs --source boards --boards data/boards.txt --once
+```
+
+持续轮询（默认每 900 秒；按 `Ctrl+C` 停止）：
+
+```powershell
+python -m recruiter_outreach.cli sync-jobs --source boards --boards data/boards.txt --interval 900
+```
+
+使用 API 来源时可指定 `--source adzuna` 或 `--source jooble`、重复 `--term "AI engineer"` 和 `--city Canada`；不指定来源时自动选择本地 `.env` 中已配置的 API 或提供的招聘板。重复运行会在 `data/jobs.sqlite3` 去重并维护首次/最近发现时间，工作簿写入 `output/latest_jobs.xlsx`。职位中提取的邮箱未经验证，不应据此直接发信。若招聘板接口不可用或配额用尽，当次同步报错，之前的 Excel 文件保留。
+
