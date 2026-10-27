@@ -97,3 +97,22 @@ python -m recruiter_outreach.cli sync-jobs --source boards --boards data/boards.
 
 使用 API 来源时可指定 `--source adzuna` 或 `--source jooble`、重复 `--term "AI engineer"` 和 `--city Canada`；不指定来源时自动选择本地 `.env` 中已配置的 API 或提供的招聘板。重复运行会在 `data/jobs.sqlite3` 去重并维护首次/最近发现时间，工作簿写入 `output/latest_jobs.xlsx`。职位中提取的邮箱未经验证，不应据此直接发信。若招聘板接口不可用或配额用尽，当次同步报错，之前的 Excel 文件保留。
 
+
+## 统一 Streamlit 入口
+
+两个目录已合并为当前仓库唯一入口。启动 Web 界面：
+
+```powershell
+python -m streamlit run app.py
+```
+
+当前界面支持：
+
+- 公开/授权来源职位同步
+- LinkedIn/Indeed Job Alert `.eml` 导入
+- SQLite 去重和 `first_seen`/`last_seen`
+- Excel 待审核导出与审核结果导入
+- 本地职位匹配评分
+- 用户主动同意后的 LLM 分析
+
+旧 `work-assistant/` 目录和重复实现已移除。旧 SMTP 自动发送实现没有迁移；主项目仍保持邮件 dry-run 和安全审核边界。

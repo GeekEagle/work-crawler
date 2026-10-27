@@ -68,6 +68,22 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig.from_env()
 
+    def complete(self, messages: list[dict[str, str]]) -> str:
+        if not self.config.enabled:
+            raise RuntimeError("LLM provider is disabled")
+        if not self.config.base_url or not self.config.api_key or not self.config.model:
+            raise RuntimeError("LLM provider requires LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL")
+        payload = json.dumps({"model": self.config.model, "temperature": 0.2, "messages": messages}).encode("utf-8")
+        req = request.Request(f"{self.config.base_url}/chat/completions", data=payload, method="POST", headers={
+            "Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json",
+        })
+        try:
+            with request.urlopen(req, timeout=45) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            return result["choices"][0]["message"]["content"]
+        except (error.URLError, TimeoutError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("LLM 请求失败或返回内容无效") from exc
+
     def generate(self, contact: Contact, resume_text: str = "") -> dict[str, str]:
         if not self.config.enabled:
             raise RuntimeError("LLM provider is disabled")
@@ -104,3 +120,4 @@ def create_llm_draft(contact: Contact, resume_path: str, client: LLMClient) -> D
     return Draft(recipient=contact.email, subject=result["subject"], body=result["body"],
                  company=contact.company, source_url=contact.source_url,
                  resume_path=resume_path, approved=False, dry_run=True)
+

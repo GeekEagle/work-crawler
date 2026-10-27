@@ -10,3 +10,7 @@ llm-config.txt
 # Local job database and private source config
 *.sqlite3
 *.sqlite3-*
+# Local UI and legacy data
+.streamlit/
+# Local backup archives
+work-assistant-canada-ai-v1.zip
