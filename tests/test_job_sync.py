@@ -19,7 +19,7 @@ def test_sync_detects_new_and_deduplicates(monkeypatch, tmp_path):
     second = sync_once(config, database, excel)
     assert first["inserted"] == 1
     assert second["inserted"] == 0
-    assert second["updated"] == 1
+    assert second["skipped"] == 1
     with connect(database) as connection:
         records = all_jobs(connection)
     assert len(records) == 1
@@ -42,3 +42,31 @@ def test_canadian_filter_and_board_validation():
             {"title": "Sales Manager", "location": "Toronto, ON"}]
     assert canadian_it_jobs(jobs) == [jobs[0]]
     assert parse_boards("ashby|Example|example") == [("ashby", "Example", "example")]
+from openpyxl import load_workbook
+
+from recruiter_outreach.job_excel import write_jobs_xlsx
+from recruiter_outreach.job_storage import all_jobs, connect, fingerprint, upsert_jobs
+
+
+def test_company_and_title_are_duplicate_key(tmp_path):
+    database = tmp_path / "jobs.sqlite3"
+    first = {"company": "Example Corp", "title": "AI Engineer", "location": "Toronto, ON", "source": "A"}
+    second = {"company": "Example Corp", "title": "AI Engineer", "location": "Vancouver, BC", "source": "B"}
+    assert fingerprint(first) == fingerprint(second)
+    with connect(database) as connection:
+        assert upsert_jobs(connection, [first]) == (1, 0)
+        assert upsert_jobs(connection, [second]) == (0, 1)
+        rows = all_jobs(connection)
+    assert len(rows) == 1
+    assert rows[0]["fetched_at"]
+    assert rows[0]["source"] == "A"
+
+
+def test_excel_contains_acquisition_time(tmp_path):
+    path = write_jobs_xlsx([{"id": "1", "company": "Example", "title": "AI Engineer", "fetched_at": "2026-10-28T01:02:03+00:00"}], tmp_path / "jobs.xlsx")
+    sheet = load_workbook(path, read_only=True)["Job Leads"]
+    headers = [cell.value for cell in sheet[1]]
+    assert "获取时间" in headers
+    assert sheet.cell(2, headers.index("获取时间") + 1).value == "2026-10-28T01:02:03+00:00"
+
+

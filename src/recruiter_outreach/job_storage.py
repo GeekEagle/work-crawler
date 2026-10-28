@@ -1,4 +1,4 @@
-"""Local SQLite persistence; no account or cloud database is required."""
+"""Local SQLite persistence for normalized job leads."""
 
 from __future__ import annotations
 
@@ -8,15 +8,29 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-DB = Path(__file__).resolve().parent / "data" / "jobs.sqlite3"
+DB = Path(__file__).resolve().parents[2] / "data" / "jobs.sqlite3"
 STATUSES = ("未处理", "感兴趣", "已投递", "面试中", "已拒绝", "不考虑")
 
 
-def connect(path: Path = DB) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(path)
-    db.row_factory = sqlite3.Row
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _norm(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def fingerprint(job: dict) -> str:
+    """Stable identity: source type + company + position, not location or posting time."""
+    company = _norm(str(job.get("company", "")))
+    title = _norm(str(job.get("title", "")))
+    if not company:
+        company = _norm(str(job.get("url", "")))
+    identity = "|".join((str(bool(job.get("is_demo"))), company, title))
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def _ensure_schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, company TEXT, location TEXT,
         description TEXT, url TEXT, source TEXT, posted TEXT, salary TEXT,
@@ -24,62 +38,71 @@ def connect(path: Path = DB) -> sqlite3.Connection:
         review_state TEXT NOT NULL DEFAULT 'pending', is_demo INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT '未处理', notes TEXT NOT NULL DEFAULT '',
         saved INTEGER NOT NULL DEFAULT 0, first_seen TEXT NOT NULL,
-        last_seen TEXT NOT NULL
+        last_seen TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT ''
     )""")
     columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
-    if "recruiter_email" not in columns:
-        db.execute("ALTER TABLE jobs ADD COLUMN recruiter_email TEXT NOT NULL DEFAULT ''")
-    if "review_state" not in columns:
-        db.execute("ALTER TABLE jobs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'")
+    migrations = {
+        "recruiter_email": "ALTER TABLE jobs ADD COLUMN recruiter_email TEXT NOT NULL DEFAULT ''",
+        "review_state": "ALTER TABLE jobs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'pending'",
+        "fetched_at": "ALTER TABLE jobs ADD COLUMN fetched_at TEXT NOT NULL DEFAULT ''",
+    }
+    for name, statement in migrations.items():
+        if name not in columns:
+            db.execute(statement)
+    db.execute("UPDATE jobs SET fetched_at=COALESCE(NULLIF(fetched_at, ''), last_seen, first_seen)")
+
+
+def _migrate_identities(db: sqlite3.Connection) -> None:
+    rows = [dict(row) for row in db.execute("SELECT * FROM jobs")]
+    for row in rows:
+        old_id = row["id"]
+        new_id = fingerprint(row)
+        if new_id == old_id:
+            continue
+        target = db.execute("SELECT id, description, source, url FROM jobs WHERE id=?", (new_id,)).fetchone()
+        if target:
+            description = row.get("description") or ""
+            if len(description) > len(target["description"] or ""):
+                db.execute("UPDATE jobs SET description=?, url=? WHERE id=?", (description, row.get("url", ""), new_id))
+            merged_source = ", ".join(dict.fromkeys(filter(None, ((target["source"] or "") + ", " + (row.get("source") or "")).split(", "))))
+            db.execute("UPDATE jobs SET source=? WHERE id=?", (merged_source, new_id))
+            db.execute("DELETE FROM jobs WHERE id=?", (old_id,))
+        else:
+            db.execute("UPDATE jobs SET id=? WHERE id=?", (new_id, old_id))
+
+
+def connect(path: Path = DB) -> sqlite3.Connection:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    db.row_factory = sqlite3.Row
+    _ensure_schema(db)
+    _migrate_identities(db)
     db.commit()
     return db
 
 
-def fingerprint(job: dict) -> str:
-    def norm(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-    def canonical_location(value: str) -> str:
-        location = (value or "").lower().replace("montréal", "montreal")
-        for long, short in (("ontario", "on"), ("british columbia", "bc"), ("quebec", "qc"),
-                            ("québec", "qc"), ("alberta", "ab")):
-            location = re.sub(r"\b" + re.escape(long) + r"\b", short, location)
-        location = re.sub(r"\bcanada\b", "", location)
-        return norm(location)
-    # Never mix fake demo rows with live ads.
-    identity = "|".join((str(bool(job.get("is_demo"))), norm(job.get("company", "")),
-                         norm(job.get("title", "")), canonical_location(job.get("location", ""))))
-    if not norm(job.get("company", "")):
-        identity += "|" + norm(job.get("url", ""))
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
-
-
 def upsert_jobs(db: sqlite3.Connection, jobs: list[dict]) -> tuple[int, int]:
-    now = datetime.now(timezone.utc).isoformat()
-    inserted = updated = 0
+    now = _now()
+    inserted = skipped = 0
     for job in jobs:
         if not job.get("title"):
             continue
         ident = fingerprint(job)
-        prior = db.execute("SELECT id, description, url, source, salary, recruiter_email FROM jobs WHERE id=?", (ident,)).fetchone()
+        prior = db.execute("SELECT * FROM jobs WHERE id=?", (ident,)).fetchone()
         if prior:
-            description = job.get("description", "") if len(job.get("description", "")) > len(prior["description"] or "") else prior["description"]
-            url = job.get("url") if not prior["url"] or len(job.get("description", "")) > len(prior["description"] or "") else prior["url"]
-            source = ", ".join(dict.fromkeys(filter(None, (prior["source"] + ", " + job.get("source", "")).split(", "))))
-            db.execute("""UPDATE jobs SET description=?, url=?, source=?, salary=?, recruiter_email=?, last_seen=? WHERE id=?""",
-                       (description, url, source, job.get("salary") or prior["salary"],
-                        job.get("recruiter_email") or prior["recruiter_email"], now, ident))
-            updated += 1
+            skipped += 1
         else:
             db.execute("""INSERT INTO jobs(id,title,company,location,description,url,source,posted,
-                       salary,job_type,remote,recruiter_email,is_demo,first_seen,last_seen)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       salary,job_type,remote,recruiter_email,is_demo,first_seen,last_seen,fetched_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (ident, job.get("title", ""), job.get("company", ""), job.get("location", ""),
                         job.get("description", ""), job.get("url", ""), job.get("source", ""), job.get("posted", ""),
                         job.get("salary", ""), job.get("job_type", ""), job.get("remote", ""),
-                        job.get("recruiter_email", ""), int(bool(job.get("is_demo"))), now, now))
+                        job.get("recruiter_email", ""), int(bool(job.get("is_demo"))), now, now, now))
             inserted += 1
     db.commit()
-    return inserted, updated
+    return inserted, skipped
 
 
 def all_jobs(db: sqlite3.Connection) -> list[dict]:
@@ -95,15 +118,6 @@ def update_user_field(db: sqlite3.Connection, ident: str, field: str, value: str
     db.commit()
 
 
-def delete_jobs(db: sqlite3.Connection, identifiers: set[str]) -> int:
-    if not identifiers:
-        return 0
-    before = db.total_changes
-    db.executemany("DELETE FROM jobs WHERE id=?", [(ident,) for ident in identifiers])
-    db.commit()
-    return db.total_changes - before
-
-
 def review_jobs(db: sqlite3.Connection, exported: set[str], kept: set[str]) -> tuple[int, int]:
     known = {row[0] for row in db.execute("SELECT id FROM jobs WHERE is_demo=0")}
     if not exported or not kept <= exported or not exported <= known:
@@ -113,3 +127,5 @@ def review_jobs(db: sqlite3.Connection, exported: set[str], kept: set[str]) -> t
     db.executemany("UPDATE jobs SET review_state='rejected' WHERE id=?", [(ident,) for ident in rejected])
     db.commit()
     return len(kept), len(rejected)
+
+

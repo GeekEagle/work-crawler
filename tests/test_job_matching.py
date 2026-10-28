@@ -52,11 +52,12 @@ class MatchingTests(unittest.TestCase):
                 row = all_jobs(db)[0]
                 self.assertEqual(row["status"], "已投递")
                 self.assertEqual(row["saved"], 1)
-                self.assertIn("PyTorch", row["description"])
+                self.assertEqual(row["description"], "Python")
             finally:
                 db.close()
 
 
 if __name__ == "__main__":
     unittest.main()
+
 

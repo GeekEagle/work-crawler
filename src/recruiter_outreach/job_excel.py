@@ -7,7 +7,7 @@ from openpyxl import Workbook, load_workbook
 
 JOB_FIELDS = [
     "id", "company", "title", "location", "salary", "recruiter_email",
-    "source", "url", "description", "posted", "status", "notes", "first_seen", "last_seen",
+    "source", "url", "description", "posted", "status", "notes", "first_seen", "last_seen", "获取时间",
 ]
 
 
@@ -17,13 +17,17 @@ def safe_cell(value):
     return value
 
 
+def _row_value(item: dict, field: str):
+    return item.get("fetched_at", "") if field == "获取时间" else item.get(field, "")
+
+
 def export_jobs_xlsx(items: list[dict], review: bool = False) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Job Leads"
     sheet.append(JOB_FIELDS)
     for item in items:
-        sheet.append([safe_cell(item.get(field, "")) for field in JOB_FIELDS])
+        sheet.append([safe_cell(_row_value(item, field)) for field in JOB_FIELDS])
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
     for column in sheet.columns:
@@ -37,9 +41,10 @@ def export_jobs_xlsx(items: list[dict], review: bool = False) -> bytes:
     readme = workbook.create_sheet("README")
     readme.append(["加拿大职位同步结果"])
     readme.append(["数据来自已配置的公开/授权职位来源；请人工核对职位链接和联系方式。"])
+    readme.append(["获取时间表示本程序本次发现或更新该职位的时间；公司和职位名称相同的记录会跳过重复插入。"])
     readme.append(["如为待审核 Excel，可删除不需要的职位整行；不要修改 id 或隐藏的 export_ids 表。"])
-    readme.append(["导出不会发送邮件。职位按首次发现时间倒序。"])
-    readme.column_dimensions["A"].width = 100
+    readme.append(["导出不会发送邮件。"])
+    readme.column_dimensions["A"].width = 110
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()

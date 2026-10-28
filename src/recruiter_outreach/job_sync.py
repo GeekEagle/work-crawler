@@ -47,16 +47,16 @@ def sync_once(config: SyncConfig, database_path: str | Path, output: str | Path)
     load_dotenv()
     jobs = _fetch(config)
     with connect(Path(database_path)) as database:
-        inserted, updated = upsert_jobs(database, jobs)
+        inserted, skipped = upsert_jobs(database, jobs)
         stored = [job for job in all_jobs(database) if not job["is_demo"]]
     write_jobs_xlsx(stored, output)
-    return {"fetched": len(jobs), "inserted": inserted, "updated": updated, "stored": len(stored), "output": str(output)}
+    return {"fetched": len(jobs), "inserted": inserted, "skipped": skipped, "stored": len(stored), "output": str(output)}
 
 
 def watch(config: SyncConfig, database_path: str | Path, output: str | Path, once: bool = False) -> None:
     while True:
         result = sync_once(config, database_path, output)
-        print(f"同步完成：抓取 {result['fetched']}，新增 {result['inserted']}，更新 {result['updated']}，工作簿 {result['output']}")
+        print(f"同步完成：抓取 {result['fetched']}，新增 {result['inserted']}，跳过重复 {result['skipped']}，工作簿 {result['output']}")
         if once:
             return
         time.sleep(config.interval_seconds)
@@ -72,3 +72,5 @@ def config_from_env(source_names: list[str], terms: list[str], cities: list[str]
     if not configured:
         raise ValueError("没有可用职位来源；请配置 API，或使用 --source boards 并提供 --boards")
     return SyncConfig(tuple(configured), tuple(terms or DEFAULT_TERMS), tuple(cities or DEFAULT_CITIES), pages, boards, interval_seconds)
+
+
